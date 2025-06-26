@@ -200,11 +200,44 @@ async function handleTCPOutBound(
 
     // if the cf connect tcp socket have no incoming data, we retry to redirect ip
     async function retry() {
+        console.log('[TROJAN-RETRY] ========== TROJAN RETRY FUNCTION CALLED ==========');
         let proxyIP, proxyIpPort;
         const EncodedPanelProxyIPs = globalThis.pathName.split('/')[2] || '';
+        console.log('[TROJAN-RETRY] EncodedPanelProxyIPs =', EncodedPanelProxyIPs);
+        
         const proxyIPs = atob(EncodedPanelProxyIPs) || globalThis.proxyIPs;
+        console.log('[TROJAN-RETRY] Final proxyIPs =', proxyIPs);
+        
         const finalProxyIPs = proxyIPs.split(',').map(ip => ip.trim());
-        proxyIP = finalProxyIPs[Math.floor(Math.random() * finalProxyIPs.length)];
+        console.log('[TROJAN-RETRY] finalProxyIPs array =', finalProxyIPs);
+        
+        const selectedProxy = finalProxyIPs[Math.floor(Math.random() * finalProxyIPs.length)];
+        console.log('[TROJAN-RETRY] selectedProxy =', selectedProxy);
+        
+        // Check if it is a VLESS or Trojan protocol proxy
+        if (selectedProxy.startsWith("vless://") || selectedProxy.startsWith("trojan://")) {
+            console.log('[TROJAN-RETRY] Attempting protocol proxy connection...');
+            const tcpSocket = await connectViaProtocolProxy(selectedProxy, addressRemote, portRemote, rawClientData, log);
+            if (tcpSocket) {
+                console.log('[TROJAN-RETRY] Protocol proxy connection successful!');
+                tcpSocket.closed
+                    .catch((error) => {
+                        console.log("[TROJAN-RETRY] Protocol proxy tcpSocket closed error", error);
+                    })
+                    .finally(() => {
+                        safeCloseWebSocket(webSocket);
+                    });
+                TRRemoteSocketToWS(tcpSocket, webSocket, null, log);
+                return;
+            } else {
+                console.log('[TROJAN-RETRY] Protocol proxy connection failed');
+            }
+        } else {
+            console.log('[TROJAN-RETRY] Using traditional proxy method');
+        }
+
+        // Traditional IP/domain proxy logic
+        proxyIP = selectedProxy;
         if (proxyIP.includes(']:')) {
             const match = proxyIP.match(/^(\[.*?\]):(\d+)$/);
             proxyIP = match[1];
@@ -370,4 +403,228 @@ function safeCloseWebSocket(socket) {
     } catch (error) {
         console.error('safeCloseWebSocket error', error);
     }
+}
+
+/**
+ * Connect to target server via VLESS or Trojan protocol proxy
+ * @param {string} proxyUrl - Proxy protocol URL (vless:// or trojan://)
+ * @param {string} targetHost - Target host
+ * @param {number} targetPort - Target port
+ * @param {Uint8Array} initialData - Initial data
+ * @param {function} log - Log function
+ * @returns {Promise<Socket|null>} Returns connected Socket or null
+ */
+async function connectViaProtocolProxy(proxyUrl, targetHost, targetPort, initialData, log) {
+    console.log('[TROJAN-PROTOCOL-PROXY] ========== PROTOCOL PROXY FUNCTION CALLED ==========');
+    console.log('[TROJAN-PROTOCOL-PROXY] Input parameters:', {
+        proxyUrl: proxyUrl,
+        targetHost: targetHost,
+        targetPort: targetPort,
+        initialDataLength: initialData.length
+    });
+    
+    try {
+        console.log('[TROJAN-PROTOCOL-PROXY] Parsing proxy URL...');
+        const url = new URL(proxyUrl);
+        const protocol = url.protocol.slice(0, -1); // Remove trailing ':'
+        const proxyHost = url.hostname;
+        const proxyPort = parseInt(url.port) || (protocol === 'vless' ? 443 : 443);
+        
+        console.log('[TROJAN-PROTOCOL-PROXY] Parsed URL details:', {
+            protocol: protocol,
+            proxyHost: proxyHost,
+            proxyPort: proxyPort,
+            username: url.username ? `${url.username.substring(0, 8)}...` : 'none'
+        });
+        
+        log(`Connecting via ${protocol} proxy: ${proxyHost}:${proxyPort} -> ${targetHost}:${targetPort}`);
+        
+        // Connect to proxy server
+        const proxySocket = connect({
+            hostname: proxyHost,
+            port: proxyPort,
+        });
+        
+        console.log('[TROJAN-PROTOCOL-PROXY] Socket created successfully');
+        
+        if (protocol === 'vless') {
+            console.log('[TROJAN-PROTOCOL-PROXY] Using VLESS protocol handler...');
+            return await connectViaVlessProxy(proxySocket, url, targetHost, targetPort, initialData, log);
+        } else if (protocol === 'trojan') {
+            console.log('[TROJAN-PROTOCOL-PROXY] Using Trojan protocol handler...');
+            return await connectViaTrojanProxy(proxySocket, url, targetHost, targetPort, initialData, log);
+        }
+        
+        return null;
+    } catch (error) {
+        console.log('[TROJAN-PROTOCOL-PROXY] Error occurred:', error.message);
+        log(`Protocol proxy connection failed: ${error.message}`);
+        return null;
+    }
+}
+
+/**
+ * Connect via VLESS proxy
+ * @param {Socket} proxySocket - Proxy Socket connection
+ * @param {URL} proxyUrl - Proxy URL object
+ * @param {string} targetHost - Target host
+ * @param {number} targetPort - Target port
+ * @param {Uint8Array} initialData - Initial data
+ * @param {function} log - Log function
+ * @returns {Promise<Socket>} Returns proxy Socket
+ */
+async function connectViaVlessProxy(proxySocket, proxyUrl, targetHost, targetPort, initialData, log) {
+    console.log('[TROJAN-VLESS-PROXY] VLESS proxy handler called');
+    const uuid = proxyUrl.username;
+    
+    // Build VLESS request header
+    const vlessHeader = buildVlessHeader(uuid, targetHost, targetPort);
+    
+    // Send VLESS handshake and initial data
+    const writer = proxySocket.writable.getWriter();
+    await writer.write(new Uint8Array([...vlessHeader, ...initialData]));
+    writer.releaseLock();
+    
+    log(`VLESS proxy handshake sent to ${targetHost}:${targetPort}`);
+    return proxySocket;
+}
+
+/**
+ * Connect via Trojan proxy
+ * @param {Socket} proxySocket - Proxy Socket connection
+ * @param {URL} proxyUrl - Proxy URL object
+ * @param {string} targetHost - Target host
+ * @param {number} targetPort - Target port
+ * @param {Uint8Array} initialData - Initial data
+ * @param {function} log - Log function
+ * @returns {Promise<Socket>} Returns proxy Socket
+ */
+async function connectViaTrojanProxy(proxySocket, proxyUrl, targetHost, targetPort, initialData, log) {
+    console.log('[TROJAN-TROJAN-PROXY] Trojan proxy handler called');
+    const password = proxyUrl.username;
+    
+    // Build Trojan request header
+    const trojanHeader = buildTrojanHeader(password, targetHost, targetPort);
+    
+    // Send Trojan handshake and initial data
+    const writer = proxySocket.writable.getWriter();
+    await writer.write(new Uint8Array([...trojanHeader, ...initialData]));
+    writer.releaseLock();
+    
+    log(`Trojan proxy handshake sent to ${targetHost}:${targetPort}`);
+    return proxySocket;
+}
+
+/**
+ * Build VLESS protocol header
+ * @param {string} uuid - User UUID
+ * @param {string} targetHost - Target host
+ * @param {number} targetPort - Target port
+ * @returns {Uint8Array} VLESS protocol header byte array
+ */
+function buildVlessHeader(uuid, targetHost, targetPort) {
+    const uuidBytes = parseUUID(uuid);
+    const version = 0;
+    const optLength = 0;
+    const command = 1; // TCP
+    
+    // Address type and address
+    let addressType, addressBytes;
+    if (/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?).){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(targetHost)) {
+        // IPv4
+        addressType = 1;
+        addressBytes = targetHost.split('.').map(num => parseInt(num));
+    } else if (/^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/.test(targetHost)) {
+        // IPv6
+        addressType = 3;
+        const ipv6Parts = targetHost.split(':');
+        addressBytes = [];
+        ipv6Parts.forEach(part => {
+            const num = parseInt(part, 16);
+            addressBytes.push((num >> 8) & 0xff, num & 0xff);
+        });
+    } else {
+        // Domain name
+        addressType = 2;
+        const hostBytes = new TextEncoder().encode(targetHost);
+        addressBytes = [hostBytes.length, ...hostBytes];
+    }
+    
+    // Port (big-endian)
+    const portBytes = [(targetPort >> 8) & 0xff, targetPort & 0xff];
+    
+    return new Uint8Array([
+        version,
+        ...uuidBytes,
+        optLength,
+        command,
+        ...portBytes,
+        addressType,
+        ...addressBytes
+    ]);
+}
+
+/**
+ * Build Trojan protocol header
+ * @param {string} password - Trojan password
+ * @param {string} targetHost - Target host
+ * @param {number} targetPort - Target port
+ * @returns {Uint8Array} Trojan protocol header byte array
+ */
+function buildTrojanHeader(password, targetHost, targetPort) {
+    const passwordHash = sha224(password);
+    const crlf = [0x0d, 0x0a];
+    
+    // SOCKS5 request format
+    const cmd = 1; // CONNECT
+    const rsv = 0; // Reserved field
+    
+    // Address type and address
+    let atype, addressBytes;
+    if (/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?).){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(targetHost)) {
+        // IPv4
+        atype = 1;
+        addressBytes = targetHost.split('.').map(num => parseInt(num));
+    } else if (/^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/.test(targetHost)) {
+        // IPv6
+        atype = 4;
+        const ipv6Parts = targetHost.split(':');
+        addressBytes = [];
+        ipv6Parts.forEach(part => {
+            const num = parseInt(part, 16);
+            addressBytes.push((num >> 8) & 0xff, num & 0xff);
+        });
+    } else {
+        // Domain name
+        atype = 3;
+        const hostBytes = new TextEncoder().encode(targetHost);
+        addressBytes = [hostBytes.length, ...hostBytes];
+    }
+    
+    // Port (big-endian)
+    const portBytes = [(targetPort >> 8) & 0xff, targetPort & 0xff];
+    
+    // Build complete Trojan header
+    const passwordBytes = new TextEncoder().encode(passwordHash);
+    const socks5Request = [cmd, rsv, atype, ...addressBytes, ...portBytes];
+    
+    return new Uint8Array([
+        ...passwordBytes,
+        ...crlf,
+        ...socks5Request
+    ]);
+}
+
+/**
+ * Parse UUID string to byte array
+ * @param {string} uuid - UUID string
+ * @returns {Uint8Array} UUID byte array
+ */
+function parseUUID(uuid) {
+    const hex = uuid.replace(/-/g, '');
+    const bytes = [];
+    for (let i = 0; i < hex.length; i += 2) {
+        bytes.push(parseInt(hex.substring(i, i + 2), 16));
+    }
+    return bytes;
 }

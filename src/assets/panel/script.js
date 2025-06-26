@@ -531,10 +531,22 @@ function validateMultipleHostNames(elements) {
 
 function validateProxyIPs() {
     const proxyIPs = document.getElementById('proxyIPs').value?.split('\n').filter(Boolean).map(ip => ip.trim());
-    const invalidValues = proxyIPs?.filter(value => !isValidHostName(value) && !isValidHostName(value, true));
+    const invalidValues = proxyIPs?.filter(value => {
+        // 检查是否为VLESS或Trojan协议URL
+        if (value.startsWith('vless://') || value.startsWith('trojan://')) {
+            try {
+                new URL(value);
+                return false; // 有效的协议URL
+            } catch {
+                return true; // 无效的协议URL
+            }
+        }
+        // 传统的IP/域名验证
+        return !isValidHostName(value) && !isValidHostName(value, true);
+    });
 
     if (invalidValues.length) {
-        alert('⛔ Invalid proxy IPs.\n👉 Please enter each IP/domain in a new line.\n\n' + invalidValues.map(ip => '⚠️ ' + ip).join('\n'));
+        alert('⛔ Invalid proxy IPs/Protocols.\n👉 Please enter each IP/domain/protocol URL in a new line.\n👉 Supported formats:\n  • IP:port (1.2.3.4:443)\n  • domain:port (example.com:443)\n  • vless://uuid@host:port?params\n  • trojan://password@host:port\n\n' + invalidValues.map(ip => '⚠️ ' + ip).join('\n'));
         return false;
     }
 
