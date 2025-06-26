@@ -482,7 +482,15 @@ async function connectViaVlessProxy(proxySocket, proxyUrl, targetHost, targetPor
     
     // Send VLESS handshake and initial data
     const writer = proxySocket.writable.getWriter();
-    await writer.write(new Uint8Array([...vlessHeader, ...initialData]));
+    
+    // Safe data merging without spread operator
+    const headerArray = vlessHeader instanceof Uint8Array ? vlessHeader : new Uint8Array(vlessHeader);
+    const dataArray = initialData instanceof Uint8Array ? initialData : new Uint8Array(initialData);
+    const combinedData = new Uint8Array(headerArray.length + dataArray.length);
+    combinedData.set(headerArray, 0);
+    combinedData.set(dataArray, headerArray.length);
+    
+    await writer.write(combinedData);
     writer.releaseLock();
     
     log(`VLESS proxy handshake sent to ${targetHost}:${targetPort}`);
@@ -508,7 +516,15 @@ async function connectViaTrojanProxy(proxySocket, proxyUrl, targetHost, targetPo
     
     // Send Trojan handshake and initial data
     const writer = proxySocket.writable.getWriter();
-    await writer.write(new Uint8Array([...trojanHeader, ...initialData]));
+    
+    // Safe data merging without spread operator
+    const headerArray = trojanHeader instanceof Uint8Array ? trojanHeader : new Uint8Array(trojanHeader);
+    const dataArray = initialData instanceof Uint8Array ? initialData : new Uint8Array(initialData);
+    const combinedData = new Uint8Array(headerArray.length + dataArray.length);
+    combinedData.set(headerArray, 0);
+    combinedData.set(dataArray, headerArray.length);
+    
+    await writer.write(combinedData);
     writer.releaseLock();
     
     log(`Trojan proxy handshake sent to ${targetHost}:${targetPort}`);
@@ -547,21 +563,29 @@ function buildVlessHeader(uuid, targetHost, targetPort) {
         // Domain name
         addressType = 2;
         const hostBytes = new TextEncoder().encode(targetHost);
-        addressBytes = [hostBytes.length, ...hostBytes];
+        addressBytes = [hostBytes.length];
+        for (let i = 0; i < hostBytes.length; i++) {
+            addressBytes.push(hostBytes[i]);
+        }
     }
     
     // Port (big-endian)
     const portBytes = [(targetPort >> 8) & 0xff, targetPort & 0xff];
     
-    return new Uint8Array([
-        version,
-        ...uuidBytes,
-        optLength,
-        command,
-        ...portBytes,
-        addressType,
-        ...addressBytes
-    ]);
+    // Build the complete array without spread operator
+    const result = [version];
+    for (let i = 0; i < uuidBytes.length; i++) {
+        result.push(uuidBytes[i]);
+    }
+    result.push(optLength, command);
+    for (let i = 0; i < portBytes.length; i++) {
+        result.push(portBytes[i]);
+    }
+    result.push(addressType);
+    for (let i = 0; i < addressBytes.length; i++) {
+        result.push(addressBytes[i]);
+    }
+    return new Uint8Array(result);
 }
 
 /**
@@ -598,7 +622,10 @@ function buildTrojanHeader(password, targetHost, targetPort) {
         // Domain name
         atype = 3;
         const hostBytes = new TextEncoder().encode(targetHost);
-        addressBytes = [hostBytes.length, ...hostBytes];
+        addressBytes = [hostBytes.length];
+        for (let i = 0; i < hostBytes.length; i++) {
+            addressBytes.push(hostBytes[i]);
+        }
     }
     
     // Port (big-endian)
@@ -606,13 +633,27 @@ function buildTrojanHeader(password, targetHost, targetPort) {
     
     // Build complete Trojan header
     const passwordBytes = new TextEncoder().encode(passwordHash);
-    const socks5Request = [cmd, rsv, atype, ...addressBytes, ...portBytes];
+    const socks5Request = [cmd, rsv, atype];
+    for (let i = 0; i < addressBytes.length; i++) {
+        socks5Request.push(addressBytes[i]);
+    }
+    for (let i = 0; i < portBytes.length; i++) {
+        socks5Request.push(portBytes[i]);
+    }
     
-    return new Uint8Array([
-        ...passwordBytes,
-        ...crlf,
-        ...socks5Request
-    ]);
+    // Build final result without spread operator
+    const result = [];
+    for (let i = 0; i < passwordBytes.length; i++) {
+        result.push(passwordBytes[i]);
+    }
+    for (let i = 0; i < crlf.length; i++) {
+        result.push(crlf[i]);
+    }
+    for (let i = 0; i < socks5Request.length; i++) {
+        result.push(socks5Request[i]);
+    }
+    
+    return new Uint8Array(result);
 }
 
 /**

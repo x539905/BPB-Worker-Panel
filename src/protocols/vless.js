@@ -154,140 +154,72 @@ async function handleTCPOutBound(
 
     // if the cf connect tcp socket have no incoming data, we retry to redirect ip
     async function retry() {
-        console.log('🔄 [VLESS-RETRY] ========== RETRY FUNCTION CALLED ==========');
-        console.log('🔄 [VLESS-RETRY] Target:', `${addressRemote}:${portRemote}`);
-        
+        console.log('[VLESS-RETRY] ========== VLESS RETRY FUNCTION CALLED ==========');
         let proxyIP, proxyIpPort;
-        
-        // 调试路径信息
-        console.log('🔍 [VLESS-RETRY] globalThis.pathName =', globalThis.pathName);
         const EncodedPanelProxyIPs = globalThis.pathName.split('/')[2] || '';
-        console.log('🔍 [VLESS-RETRY] EncodedPanelProxyIPs =', EncodedPanelProxyIPs);
-        console.log('🔍 [VLESS-RETRY] EncodedPanelProxyIPs length =', EncodedPanelProxyIPs.length);
+        console.log('[VLESS-RETRY] EncodedPanelProxyIPs =', EncodedPanelProxyIPs);
         
-        // 调试解码过程
-        let decodedProxyIPs = '';
-        if (EncodedPanelProxyIPs) {
-            try {
-                decodedProxyIPs = atob(EncodedPanelProxyIPs);
-                console.log('✅ [VLESS-RETRY] Successfully decoded ProxyIPs =', decodedProxyIPs);
-            } catch (error) {
-                console.log('❌ [VLESS-RETRY] Failed to decode ProxyIPs:', error.message);
-            }
-        } else {
-            console.log('⚠️ [VLESS-RETRY] No encoded proxy IPs found in path');
-        }
-        
-        const proxyIPs = decodedProxyIPs || globalThis.proxyIPs;
-        console.log('🔍 [VLESS-RETRY] Final proxyIPs =', proxyIPs);
-        console.log('🔍 [VLESS-RETRY] Default globalThis.proxyIPs =', globalThis.proxyIPs);
+        const proxyIPs = atob(EncodedPanelProxyIPs) || globalThis.proxyIPs;
+        console.log('[VLESS-RETRY] Final proxyIPs =', proxyIPs);
         
         const finalProxyIPs = proxyIPs.split(',').map(ip => ip.trim());
-        console.log('🔍 [VLESS-RETRY] finalProxyIPs array =', finalProxyIPs);
-        console.log('🔍 [VLESS-RETRY] finalProxyIPs count =', finalProxyIPs.length);
+        console.log('[VLESS-RETRY] finalProxyIPs array =', finalProxyIPs);
         
-        const randomIndex = Math.floor(Math.random() * finalProxyIPs.length);
-        const selectedProxy = finalProxyIPs[randomIndex];
-        console.log('🔍 [VLESS-RETRY] Random index =', randomIndex);
-        console.log('🔍 [VLESS-RETRY] selectedProxy =', selectedProxy);
+        const selectedProxy = finalProxyIPs[Math.floor(Math.random() * finalProxyIPs.length)];
+        console.log('[VLESS-RETRY] selectedProxy =', selectedProxy);
         
-        const isVlessProxy = selectedProxy.startsWith('vless://');
-        const isTrojanProxy = selectedProxy.startsWith('trojan://');
-        const isProtocolProxy = isVlessProxy || isTrojanProxy;
-        
-        console.log('🔍 [VLESS-RETRY] Is VLESS proxy?', isVlessProxy);
-        console.log('🔍 [VLESS-RETRY] Is Trojan proxy?', isTrojanProxy);
-        console.log('🔍 [VLESS-RETRY] Is Protocol proxy?', isProtocolProxy);
-        
-        // 检查是否为VLESS或Trojan协议代理
-        if (isProtocolProxy) {
-            console.log('✅ [VLESS-RETRY] Attempting protocol proxy connection...');
-            console.log('🔍 [VLESS-RETRY] Protocol proxy details:', {
-                proxy: selectedProxy,
-                target: `${addressRemote}:${portRemote}`,
-                dataLength: rawClientData.length
-            });
-            
+        // Check if it is a VLESS or Trojan protocol proxy
+        if (selectedProxy.startsWith("vless://") || selectedProxy.startsWith("trojan://")) {
+            console.log('[VLESS-RETRY] Attempting protocol proxy connection...');
             const tcpSocket = await connectViaProtocolProxy(selectedProxy, addressRemote, portRemote, rawClientData, log);
-            
             if (tcpSocket) {
-                console.log('✅ [VLESS-RETRY] Protocol proxy connection successful!');
+                console.log('[VLESS-RETRY] Protocol proxy connection successful!');
                 tcpSocket.closed
                     .catch((error) => {
-                        console.log("❌ [VLESS-RETRY] Protocol proxy tcpSocket closed error", error);
+                        console.log("[VLESS-RETRY] Protocol proxy tcpSocket closed error", error);
                     })
                     .finally(() => {
-                        console.log('🔄 [VLESS-RETRY] Closing WebSocket after protocol proxy');
                         safeCloseWebSocket(webSocket);
                     });
                 VLRemoteSocketToWS(tcpSocket, webSocket, VLResponseHeader, null, log);
-                console.log('🔄 [VLESS-RETRY] ========== RETRY FUNCTION COMPLETED (PROTOCOL PROXY SUCCESS) ==========');
                 return;
             } else {
-                console.log('❌ [VLESS-RETRY] Protocol proxy connection failed, falling back to traditional proxy');
+                console.log('[VLESS-RETRY] Protocol proxy connection failed');
             }
         } else {
-            console.log('🔍 [VLESS-RETRY] Not a protocol proxy, using traditional proxy method');
+            console.log('[VLESS-RETRY] Using traditional proxy method');
         }
-        
-        // 传统IP/域名代理逻辑
+
+        // Traditional IP/domain proxy logic
         proxyIP = selectedProxy;
-        console.log('🔍 [VLESS-RETRY] Traditional proxy processing...');
-        console.log('🔍 [VLESS-RETRY] Initial proxyIP =', proxyIP);
-        
         if (proxyIP.includes(']:')) {
-            console.log('🔍 [VLESS-RETRY] Detected IPv6 format with port');
             const match = proxyIP.match(/^(\[.*?\]):(\d+)$/);
-            if (match) {
-                proxyIP = match[1];
-                proxyIpPort = +match[2];
-                console.log('🔍 [VLESS-RETRY] Parsed IPv6 - IP:', proxyIP, 'Port:', proxyIpPort);
-            }
+            proxyIP = match[1];
+            proxyIpPort = +match[2];
         }
 
         if (proxyIP.split(':').length === 2) {
-            console.log('🔍 [VLESS-RETRY] Detected IP:Port format');
-            const parts = proxyIP.split(':');
-            proxyIP = parts[0];
-            proxyIpPort = +parts[1];
-            console.log('🔍 [VLESS-RETRY] Parsed IP:Port - IP:', proxyIP, 'Port:', proxyIpPort);
+            proxyIP = proxyIP.split(':')[0];
+            proxyIpPort = +proxyIP.split(':')[1];
         }
 
-        const finalIP = proxyIP || addressRemote;
-        const finalPort = proxyIpPort || portRemote;
-        console.log('🔍 [VLESS-RETRY] Final connection target:', `${finalIP}:${finalPort}`);
-        
-        try {
-            const tcpSocket = await connectAndWrite(finalIP, finalPort);
-            console.log('✅ [VLESS-RETRY] Traditional proxy connection successful!');
-            
-            // no matter retry success or not, close websocket
-            tcpSocket.closed
-                .catch((error) => {
-                    console.log("❌ [VLESS-RETRY] Traditional proxy tcpSocket closed error", error);
-                })
-                .finally(() => {
-                    console.log('🔄 [VLESS-RETRY] Closing WebSocket after traditional proxy');
-                    safeCloseWebSocket(webSocket);
-                });
+        const tcpSocket = await connectAndWrite(proxyIP || addressRemote, proxyIpPort || portRemote);
+        // no matter retry success or not, close websocket
+        tcpSocket.closed
+            .catch((error) => {
+                console.log("retry tcpSocket closed error", error);
+            })
+            .finally(() => {
+                safeCloseWebSocket(webSocket);
+            });
 
-            VLRemoteSocketToWS(tcpSocket, webSocket, VLResponseHeader, null, log);
-            console.log('🔄 [VLESS-RETRY] ========== RETRY FUNCTION COMPLETED (TRADITIONAL PROXY SUCCESS) ==========');
-        } catch (error) {
-            console.log('❌ [VLESS-RETRY] Traditional proxy connection failed:', error.message);
-            console.log('🔄 [VLESS-RETRY] ========== RETRY FUNCTION COMPLETED (ALL FAILED) ==========');
-        }
+        VLRemoteSocketToWS(tcpSocket, webSocket, VLResponseHeader, null, log);
     }
 
-    console.log('🌐 [VLESS-MAIN] ========== MAIN CONNECTION ATTEMPT ==========');
-    console.log('🌐 [VLESS-MAIN] Direct connection to:', `${addressRemote}:${portRemote}`);
-    
     const tcpSocket = await connectAndWrite(addressRemote, portRemote);
-    console.log('✅ [VLESS-MAIN] Direct connection established');
 
     // when remoteSocket is ready, pass to websocket
     // remote--> ws
-    console.log('🌐 [VLESS-MAIN] Starting socket to WebSocket relay...');
     VLRemoteSocketToWS(tcpSocket, webSocket, VLResponseHeader, retry, log);
 }
 
@@ -477,6 +409,23 @@ function processVLHeader(VLBuffer, userID) {
  * @returns {Promise<void>} A Promise that resolves when the conversion is complete.
  */
 async function VLRemoteSocketToWS(remoteSocket, webSocket, VLResponseHeader, retry, log) {
+    // 检查代理URL是否是WebSocket类型
+    const pathParts = globalThis.pathName.split('/');
+    const encodedProxyURL = pathParts.length > 2 ? pathParts[2] : '';
+    let isWebSocketProxy = false;
+    
+    if (encodedProxyURL) {
+        try {
+            const decodedURL = atob(encodedProxyURL);
+            isWebSocketProxy = decodedURL.includes('type=ws');
+            if (isWebSocketProxy) {
+                console.log('[VLESS-RELAY] Detected WebSocket proxy');
+            }
+        } catch (e) {
+            // Ignore decode errors
+        }
+    }
+    
     // remote--> ws
     let remoteChunkCount = 0;
     let chunks = [];
@@ -498,16 +447,25 @@ async function VLRemoteSocketToWS(remoteSocket, webSocket, VLResponseHeader, ret
                     if (webSocket.readyState !== WS_READY_STATE_OPEN) {
                         controller.error("webSocket.readyState is not open, maybe close");
                     }
+                    
+                    // 如果是WebSocket代理，需要解析WebSocket帧
+                    let processedChunk = chunk;
+                    if (isWebSocketProxy) {
+                        try {
+                            const parsedData = parseWebSocketFrame(chunk);
+                            if (parsedData) {
+                                processedChunk = parsedData;
+                            }
+                        } catch (error) {
+                            console.log('[VLESS-RELAY] WebSocket frame parsing error:', error.message);
+                        }
+                    }
+                    
                     if (VLHeader) {
-                        webSocket.send(await new Blob([VLHeader, chunk]).arrayBuffer());
+                        webSocket.send(await new Blob([VLHeader, processedChunk]).arrayBuffer());
                         VLHeader = null;
                     } else {
-                        // seems no need rate limit this, CF seems fix this??..
-                        // if (remoteChunkCount > 20000) {
-                        // 	// cf one package is 4096 byte(4kb),  4096 * 20000 = 80M
-                        // 	await delay(1);
-                        // }
-                        webSocket.send(chunk);
+                        webSocket.send(processedChunk);
                     }
                 },
                 close() {
@@ -527,18 +485,9 @@ async function VLRemoteSocketToWS(remoteSocket, webSocket, VLResponseHeader, ret
     // seems is cf connect socket have error,
     // 1. Socket.closed will have error
     // 2. Socket.readable will be close without any data coming
-    console.log('🔍 [VLESS-RELAY] Checking if retry is needed...');
-    console.log('🔍 [VLESS-RELAY] hasIncomingData:', hasIncomingData);
-    console.log('🔍 [VLESS-RELAY] retry function available:', !!retry);
-    
     if (hasIncomingData === false && retry) {
-        console.log('⚠️ [VLESS-RELAY] No incoming data detected, triggering retry...');
         log(`retry`);
         retry();
-    } else if (hasIncomingData === true) {
-        console.log('✅ [VLESS-RELAY] Data received successfully, no retry needed');
-    } else {
-        console.log('🔍 [VLESS-RELAY] No retry function available or not needed');
     }
 }
 
@@ -691,17 +640,17 @@ async function handleUDPOutBound(webSocket, VLResponseHeader, log) {
 }
 
 /**
- * 通过VLESS或Trojan协议代理连接目标服务器
- * @param {string} proxyUrl - 代理协议URL (vless:// 或 trojan://)
- * @param {string} targetHost - 目标主机
- * @param {number} targetPort - 目标端口
- * @param {Uint8Array} initialData - 初始数据
- * @param {function} log - 日志函数
- * @returns {Promise<Socket|null>} 返回连接的Socket或null
+ * Connect to target server via VLESS or Trojan protocol proxy
+ * @param {string} proxyUrl - Proxy protocol URL (vless:// or trojan://)
+ * @param {string} targetHost - Target host
+ * @param {number} targetPort - Target port
+ * @param {Uint8Array} initialData - Initial data
+ * @param {function} log - Log function
+ * @returns {Promise<Socket|null>} Returns connected Socket or null
  */
 async function connectViaProtocolProxy(proxyUrl, targetHost, targetPort, initialData, log) {
-    console.log('🚀 [PROTOCOL-PROXY] ========== PROTOCOL PROXY FUNCTION CALLED ==========');
-    console.log('🚀 [PROTOCOL-PROXY] Input parameters:', {
+    console.log('[VLESS-PROTOCOL-PROXY] ========== PROTOCOL PROXY FUNCTION CALLED ==========');
+    console.log('[VLESS-PROTOCOL-PROXY] Input parameters:', {
         proxyUrl: proxyUrl,
         targetHost: targetHost,
         targetPort: targetPort,
@@ -709,55 +658,41 @@ async function connectViaProtocolProxy(proxyUrl, targetHost, targetPort, initial
     });
     
     try {
-        console.log('🔍 [PROTOCOL-PROXY] Parsing proxy URL...');
+        console.log('[VLESS-PROTOCOL-PROXY] Parsing proxy URL...');
         const url = new URL(proxyUrl);
-        const protocol = url.protocol.slice(0, -1); // 移除末尾的 ':'
+        const protocol = url.protocol.slice(0, -1); // Remove trailing ':'
         const proxyHost = url.hostname;
         const proxyPort = parseInt(url.port) || (protocol === 'vless' ? 443 : 443);
-        const username = url.username;
-        const searchParams = url.search;
         
-        console.log('🔍 [PROTOCOL-PROXY] Parsed URL details:', {
+        console.log('[VLESS-PROTOCOL-PROXY] Parsed URL details:', {
             protocol: protocol,
             proxyHost: proxyHost,
             proxyPort: proxyPort,
-            username: username ? `${username.substring(0, 8)}...` : 'none',
-            searchParams: searchParams,
-            pathname: url.pathname
+            username: url.username ? `${url.username.substring(0, 8)}...` : 'none'
         });
         
         log(`Connecting via ${protocol} proxy: ${proxyHost}:${proxyPort} -> ${targetHost}:${targetPort}`);
-        console.log('🔍 [PROTOCOL-PROXY] Creating socket connection to proxy server...');
         
-        // 连接到代理服务器
+        // Connect to proxy server
         const proxySocket = connect({
             hostname: proxyHost,
             port: proxyPort,
         });
         
-        console.log('✅ [PROTOCOL-PROXY] Socket created successfully');
-        console.log('🔍 [PROTOCOL-PROXY] Protocol type:', protocol);
+        console.log('[VLESS-PROTOCOL-PROXY] Socket created successfully');
         
         if (protocol === 'vless') {
-            console.log('🔍 [PROTOCOL-PROXY] Using VLESS protocol handler...');
-            const result = await connectViaVlessProxy(proxySocket, url, targetHost, targetPort, initialData, log);
-            console.log('🔍 [PROTOCOL-PROXY] VLESS handler result:', result ? 'SUCCESS' : 'FAILED');
-            return result;
+            console.log('[VLESS-PROTOCOL-PROXY] Using VLESS protocol handler...');
+            return await connectViaVlessProxy(proxySocket, url, targetHost, targetPort, initialData, log);
         } else if (protocol === 'trojan') {
-            console.log('🔍 [PROTOCOL-PROXY] Using Trojan protocol handler...');
-            const result = await connectViaTrojanProxy(proxySocket, url, targetHost, targetPort, initialData, log);
-            console.log('🔍 [PROTOCOL-PROXY] Trojan handler result:', result ? 'SUCCESS' : 'FAILED');
-            return result;
-        } else {
-            console.log('❌ [PROTOCOL-PROXY] Unknown protocol:', protocol);
-            console.log('🚀 [PROTOCOL-PROXY] ========== PROTOCOL PROXY FUNCTION COMPLETED (UNKNOWN PROTOCOL) ==========');
-            return null;
+            console.log('[VLESS-PROTOCOL-PROXY] Using Trojan protocol handler...');
+            return await connectViaTrojanProxy(proxySocket, url, targetHost, targetPort, initialData, log);
         }
+        
+        return null;
     } catch (error) {
-        console.log('❌ [PROTOCOL-PROXY] Error occurred:', error.message);
-        console.log('❌ [PROTOCOL-PROXY] Error stack:', error.stack);
+        console.log('[VLESS-PROTOCOL-PROXY] Error occurred:', error.message);
         log(`Protocol proxy connection failed: ${error.message}`);
-        console.log('🚀 [PROTOCOL-PROXY] ========== PROTOCOL PROXY FUNCTION COMPLETED (ERROR) ==========');
         return null;
     }
 }
@@ -773,48 +708,88 @@ async function connectViaProtocolProxy(proxyUrl, targetHost, targetPort, initial
  * @returns {Promise<Socket>} 返回代理Socket
  */
 async function connectViaVlessProxy(proxySocket, proxyUrl, targetHost, targetPort, initialData, log) {
-    console.log('🔵 [VLESS-PROXY] ========== VLESS PROXY HANDLER CALLED ==========');
-    
+    console.log('[VLESS-PROXY] VLESS proxy handler called');
     const uuid = proxyUrl.username;
     const params = new URLSearchParams(proxyUrl.search);
-    
-    console.log('🔍 [VLESS-PROXY] VLESS connection details:', {
-        uuid: uuid ? `${uuid.substring(0, 8)}...` : 'none',
-        targetHost: targetHost,
-        targetPort: targetPort,
-        initialDataLength: initialData.length,
-        searchParams: proxyUrl.search
-    });
+    const wsType = params.get('type');
+    const wsPath = params.get('path') || '/';
+    const wsHost = params.get('host') || proxyUrl.hostname;
     
     try {
+        // 如果是WebSocket类型，需要先进行WebSocket握手
+        if (wsType === 'ws') {
+            console.log('[VLESS-PROXY] Performing WebSocket handshake...');
+            
+            // 构建WebSocket握手请求
+            const wsKey = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
+            const wsRequest = [
+                `GET ${wsPath} HTTP/1.1`,
+                `Host: ${wsHost}`,
+                `Upgrade: websocket`,
+                `Connection: Upgrade`,
+                `Sec-WebSocket-Key: ${wsKey}`,
+                `Sec-WebSocket-Version: 13`,
+                `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36`,
+                '',
+                ''
+            ].join('\r\n');
+            
+            const writer = proxySocket.writable.getWriter();
+            await writer.write(new TextEncoder().encode(wsRequest));
+            writer.releaseLock();
+            
+            // 等待WebSocket握手响应
+            const reader = proxySocket.readable.getReader();
+            const { value: responseData, done } = await reader.read();
+            reader.releaseLock();
+            
+            if (done || !responseData) {
+                console.log('[VLESS-PROXY] WebSocket handshake failed: no response');
+                return null;
+            }
+            
+            const response = new TextDecoder().decode(responseData);
+            console.log('[VLESS-PROXY] WebSocket handshake response:', response.split('\r\n')[0]);
+            
+            if (!response.includes('101 Switching Protocols')) {
+                console.log('[VLESS-PROXY] WebSocket handshake failed');
+                return null;
+            }
+            
+            console.log('[VLESS-PROXY] WebSocket handshake successful');
+        }
+        
         // 构建VLESS请求头
-        console.log('🔍 [VLESS-PROXY] Building VLESS header...');
         const vlessHeader = buildVlessHeader(uuid, targetHost, targetPort);
-        console.log('🔍 [VLESS-PROXY] VLESS header built, length:', vlessHeader.length);
         
         // 发送VLESS握手和初始数据
-        console.log('🔍 [VLESS-PROXY] Getting socket writer...');
         const writer = proxySocket.writable.getWriter();
         
-        const combinedData = new Uint8Array([...vlessHeader, ...initialData]);
-        console.log('🔍 [VLESS-PROXY] Sending data:', {
-            headerLength: vlessHeader.length,
-            initialDataLength: initialData.length,
-            totalLength: combinedData.length
-        });
+        // 安全的数据合并，不使用展开运算符
+        const headerArray = vlessHeader instanceof Uint8Array ? vlessHeader : new Uint8Array(vlessHeader);
+        const dataArray = initialData instanceof Uint8Array ? initialData : new Uint8Array(initialData);
         
-        await writer.write(combinedData);
+        let finalData;
+        if (wsType === 'ws') {
+            // 对于WebSocket，需要将数据包装成WebSocket帧
+            const combinedData = new Uint8Array(headerArray.length + dataArray.length);
+            combinedData.set(headerArray, 0);
+            combinedData.set(dataArray, headerArray.length);
+            finalData = createWebSocketFrame(combinedData);
+        } else {
+            // 直接合并数据
+            finalData = new Uint8Array(headerArray.length + dataArray.length);
+            finalData.set(headerArray, 0);
+            finalData.set(dataArray, headerArray.length);
+        }
+        
+        await writer.write(finalData);
         writer.releaseLock();
         
-        console.log('✅ [VLESS-PROXY] VLESS handshake and initial data sent successfully');
         log(`VLESS proxy handshake sent to ${targetHost}:${targetPort}`);
-        
-        console.log('🔵 [VLESS-PROXY] ========== VLESS PROXY HANDLER COMPLETED (SUCCESS) ==========');
         return proxySocket;
     } catch (error) {
-        console.log('❌ [VLESS-PROXY] Error in VLESS proxy handler:', error.message);
-        console.log('❌ [VLESS-PROXY] Error stack:', error.stack);
-        console.log('🔵 [VLESS-PROXY] ========== VLESS PROXY HANDLER COMPLETED (ERROR) ==========');
+        console.log('[VLESS-PROXY] Error in VLESS proxy handler:', error.message);
         return null;
     }
 }
@@ -837,7 +812,15 @@ async function connectViaTrojanProxy(proxySocket, proxyUrl, targetHost, targetPo
     
     // 发送Trojan握手和初始数据
     const writer = proxySocket.writable.getWriter();
-    await writer.write(new Uint8Array([...trojanHeader, ...initialData]));
+    
+    // Safe data merging without spread operator
+    const headerArray = trojanHeader instanceof Uint8Array ? trojanHeader : new Uint8Array(trojanHeader);
+    const dataArray = initialData instanceof Uint8Array ? initialData : new Uint8Array(initialData);
+    const combinedData = new Uint8Array(headerArray.length + dataArray.length);
+    combinedData.set(headerArray, 0);
+    combinedData.set(dataArray, headerArray.length);
+    
+    await writer.write(combinedData);
     writer.releaseLock();
     
     log(`Trojan proxy handshake sent to ${targetHost}:${targetPort}`);
@@ -876,21 +859,29 @@ function buildVlessHeader(uuid, targetHost, targetPort) {
         // 域名
         addressType = 2;
         const hostBytes = new TextEncoder().encode(targetHost);
-        addressBytes = [hostBytes.length, ...hostBytes];
+        addressBytes = [hostBytes.length];
+        for (let i = 0; i < hostBytes.length; i++) {
+            addressBytes.push(hostBytes[i]);
+        }
     }
     
     // 端口（大端序）
     const portBytes = [(targetPort >> 8) & 0xff, targetPort & 0xff];
     
-    return new Uint8Array([
-        version,
-        ...uuidBytes,
-        optLength,
-        command,
-        ...portBytes,
-        addressType,
-        ...addressBytes
-    ]);
+    // Build the complete array without spread operator
+    const result = [version];
+    for (let i = 0; i < uuidBytes.length; i++) {
+        result.push(uuidBytes[i]);
+    }
+    result.push(optLength, command);
+    for (let i = 0; i < portBytes.length; i++) {
+        result.push(portBytes[i]);
+    }
+    result.push(addressType);
+    for (let i = 0; i < addressBytes.length; i++) {
+        result.push(addressBytes[i]);
+    }
+    return new Uint8Array(result);
 }
 
 /**
@@ -927,7 +918,10 @@ function buildTrojanHeader(password, targetHost, targetPort) {
         // 域名
         atype = 3;
         const hostBytes = new TextEncoder().encode(targetHost);
-        addressBytes = [hostBytes.length, ...hostBytes];
+        addressBytes = [hostBytes.length];
+        for (let i = 0; i < hostBytes.length; i++) {
+            addressBytes.push(hostBytes[i]);
+        }
     }
     
     // 端口（大端序）
@@ -935,13 +929,27 @@ function buildTrojanHeader(password, targetHost, targetPort) {
     
     // 构建完整的Trojan头
     const passwordBytes = new TextEncoder().encode(passwordHash);
-    const socks5Request = [cmd, rsv, atype, ...addressBytes, ...portBytes];
+    const socks5Request = [cmd, rsv, atype];
+    for (let i = 0; i < addressBytes.length; i++) {
+        socks5Request.push(addressBytes[i]);
+    }
+    for (let i = 0; i < portBytes.length; i++) {
+        socks5Request.push(portBytes[i]);
+    }
     
-    return new Uint8Array([
-        ...passwordBytes,
-        ...crlf,
-        ...socks5Request
-    ]);
+    // Build final result without spread operator
+    const result = [];
+    for (let i = 0; i < passwordBytes.length; i++) {
+        result.push(passwordBytes[i]);
+    }
+    for (let i = 0; i < crlf.length; i++) {
+        result.push(crlf[i]);
+    }
+    for (let i = 0; i < socks5Request.length; i++) {
+        result.push(socks5Request[i]);
+    }
+    
+    return new Uint8Array(result);
 }
 
 /**
@@ -957,3 +965,106 @@ function parseUUID(uuid) {
     }
     return bytes;
 }
+
+/**
+ * 创建WebSocket二进制帧
+ * @param {Uint8Array} data - 要包装的数据
+ * @returns {Uint8Array} WebSocket帧
+ */
+function createWebSocketFrame(data) {
+    const dataLength = data.length;
+    let frame;
+    
+    if (dataLength < 126) {
+        // 短帧：2字节头部
+        frame = new Uint8Array(2 + dataLength);
+        frame[0] = 0x82; // FIN=1, opcode=2 (binary)
+        frame[1] = dataLength;
+        frame.set(data, 2);
+    } else if (dataLength < 65536) {
+        // 中等帧：4字节头部
+        frame = new Uint8Array(4 + dataLength);
+        frame[0] = 0x82; // FIN=1, opcode=2 (binary)
+        frame[1] = 126;
+        frame[2] = (dataLength >> 8) & 0xff;
+        frame[3] = dataLength & 0xff;
+        frame.set(data, 4);
+    } else {
+        // 长帧：10字节头部
+        frame = new Uint8Array(10 + dataLength);
+        frame[0] = 0x82; // FIN=1, opcode=2 (binary)
+        frame[1] = 127;
+        // 64位长度，但JavaScript只支持53位精度，所以前4字节为0
+        frame[2] = 0;
+        frame[3] = 0;
+        frame[4] = 0;
+        frame[5] = 0;
+        frame[6] = (dataLength >> 24) & 0xff;
+        frame[7] = (dataLength >> 16) & 0xff;
+        frame[8] = (dataLength >> 8) & 0xff;
+        frame[9] = dataLength & 0xff;
+        frame.set(data, 10);
+    }
+    
+    return frame;
+}
+
+/**
+ * 解析WebSocket帧
+ * @param {Uint8Array} frame - WebSocket帧数据
+ * @returns {Uint8Array|null} 解析出的数据，如果解析失败返回null
+ */
+function parseWebSocketFrame(frame) {
+    if (frame.length < 2) {
+        return null;
+    }
+    
+    const firstByte = frame[0];
+    const secondByte = frame[1];
+    
+    // 检查FIN位和opcode
+    const fin = (firstByte & 0x80) === 0x80;
+    const opcode = firstByte & 0x0f;
+    
+    // 只处理二进制帧 (opcode = 2) 或文本帧 (opcode = 1)
+    if (opcode !== 1 && opcode !== 2) {
+        return null;
+    }
+    
+    // 获取payload长度
+    const masked = (secondByte & 0x80) === 0x80;
+    let payloadLength = secondByte & 0x7f;
+    let offset = 2;
+    
+    if (payloadLength === 126) {
+        if (frame.length < 4) return null;
+        payloadLength = (frame[2] << 8) | frame[3];
+        offset = 4;
+    } else if (payloadLength === 127) {
+        if (frame.length < 10) return null;
+        // JavaScript只支持53位精度，忽略前4字节
+        payloadLength = (frame[6] << 24) | (frame[7] << 16) | (frame[8] << 8) | frame[9];
+        offset = 10;
+    }
+    
+    // 处理掩码
+    if (masked) {
+        if (frame.length < offset + 4) return null;
+        const maskKey = frame.slice(offset, offset + 4);
+        offset += 4;
+        
+        if (frame.length < offset + payloadLength) return null;
+        const payload = frame.slice(offset, offset + payloadLength);
+        
+        // 解除掩码
+        for (let i = 0; i < payload.length; i++) {
+            payload[i] ^= maskKey[i % 4];
+        }
+        
+        return payload;
+    } else {
+        if (frame.length < offset + payloadLength) return null;
+        return frame.slice(offset, offset + payloadLength);
+    }
+}
+
